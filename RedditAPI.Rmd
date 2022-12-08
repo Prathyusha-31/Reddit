@@ -1,0 +1,460 @@
+---
+title: "Reddit Popular Post Prediction and Analysis"
+author: "Prathyusha"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# BUISNESS CONTEXT:
+
+Reddit  is an American Social news Aggregation, content rating and discussion websites. Registered users (commonly referred to as "Redditors") submit content to the site such as links, text posts, images, and videos, which are then voted up or down by other members. Posts are organized by subject into user-created boards called "communities" or "subreddits". Submissions with more upvotes appear towards the top of their subreddit and, if they receive enough upvotes,their post ultimately shows on the site's front page.
+
+The Reddit Data API lets you incorporate Reddit functionality into your own application. You can use the API to fetch the search results of users and post content.
+
+# PROBLEM DESCRIPTION:
+Reddit is a highly visited site, the popular posts on the site can be seen by a lot of people. Similar to other platforms reddit has a unique algorithm for ranking posts. The higher a post ranks the more people it will be seen by and the more popular it becomes.
+
+By doing textual analysis we have analyzed what makes a post popular, and see if we can predict whether the posts will become popular or not based on their title, comments and upvotes.
+
+This project is interesting because, people’s opinion on social media has a huge impact on our society today, viral posts and trending topics can influence public opinion.
+
+# URL LINK TO ZIP FILE:
+
+https://drive.google.com/file/d/1TxsdPeCVmeWMzlnyNUTTXVC9DpO8s8nt/view?usp=sharing
+
+# PROJECT FLOW:
+
+# STEP 1: INCLUDING LIBRARIES:
+
+```{r warning = FALSE, message=FALSE}
+library(keras)
+library(reticulate)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(readr)
+library(data.table)
+library(tidyverse)
+library(stringr)
+library(knitr)
+library(kableExtra)
+library(magrittr)
+library("readxl")
+library(tensorflow)
+```
+
+# STEP 2: DATASET DESCRIPTION:
+
+Link to csv files:
+https://drive.google.com/file/d/1TxsdPeCVmeWMzlnyNUTTXVC9DpO8s8nt/view?usp=sharing
+
+We used the Reddit API along with the R wrapper: RedditExtractoR, to scrape our data. We mainly scraped data from different subreddits: r/AskReddit, r/movies, r/todayilearned, r/gaming, r/Art, r/aww/, r/books, r/Earth, r/explainlikeimfive, r/funny, r/gadgets, r/gaming, r/gifs, r/IAma, r/Jokes, r/LifeProTips, r/mildlyinteresting, r/news, r/nottheonion, r/pics, r/science, r/Showerthoughts, r/space, r/sports.We have scraped 20460 records and we have 15 columns.
+
+*URL: This column consists of endpoints of subreddit. 
+
+*Author: The author of the post 
+
+*Date: The day the post is uploaded 
+
+*Timestamp: The time the post is uploaded.
+
+*Title: This column depicts the title of the post
+
+*Text: It depicts the text of the post
+
+*Subreddit: It consists of subreddit topics
+
+*Score: A comment's score is simply the number of upvotes minus the number of downvotes.
+
+*Upvotes: The website Reddit by which users can signal their approval or support for a post
+
+*Downvotes: A downvote is an action that a user can take on the Reddit website (and in some other user interfaces) that is used to signal disapproval or try to downgrade a post and its content.
+
+*UpRatio: Up ratio of the posts
+
+*TotalAwardsReceived: Redditors give each other awards as a way to recognize and react to each other's contributions
+
+*Golds: This is the middle level award and likely the most popular. In addition to showing a Gold Award badge next to the comment or submissions
+
+*CrossPosts: When you crosspost content, the crosspost includes an embed of the original post, along with the username, community, and score on the original post. This gives your fellow redditors a way to find the original source of the content while also providing ways to get more exposure for the original content and the community it was posted in
+
+*Comments: Feelings of a viewer about the particular post.
+
+# IMPORTING CSV:
+
+```{r warning = FALSE, message=FALSE}
+raw_data<- read_csv("FinalDataset1.csv")
+temp<-iconv(raw_data, "latin1", "ASCII", sub="")
+nrow(raw_data)
+```
+# Overview of the dataset.
+
+```{r}
+kbl(raw_data[1:5,]) %>%
+
+  kable_material_dark("hover",bootstrap_options = "striped", full_width = F)
+```
+
+# Data Exploration
+
+We removed any links in the text since these would not be useful for our model.
+
+```{r}
+cleaned_dataset <- raw_data %>%
+  mutate(Title = str_replace_all(Title,  "<.+>", " ")) %>%
+  mutate(Title = str_replace_all(Title,  "\\W", " ")) %>%
+  mutate(Title = str_replace_all(Title,  "www|https|http", " ")) %>%
+  mutate(Text = str_replace_all(Text,  "<.+>", " ")) %>%
+  mutate(Text = str_replace_all(Text,  "\\W", " ")) %>%
+  mutate(Text = str_replace_all(Text,  "www|https|http", " "))
+
+
+
+```
+
+# Overview of the cleaned dataset
+
+```{r}
+kbl(cleaned_dataset[1:5,]) %>%
+
+  kable_material_dark("hover",bootstrap_options = "striped", full_width = F)
+```
+
+The next step was to add the column for what posts are popular. We decided to mark any post that has more than 1000 upvotes and 500 comments as popular.
+
+```{r}
+
+cleaned_dataset<-cleaned_dataset %>%
+  mutate(Popular = ifelse(
+    ((Upvotes >= 1000) & 
+       (Comments >= 500)),
+    1, 0 
+  ))
+
+```
+
+When we look at the total number of popular posts vs not popular we can see that the data is skewed.
+
+```{r}
+post_totals = as.data.frame(table(cleaned_dataset$Popular)) 
+ggplot(post_totals, aes(x=Var1, y=Freq, color=Var1)) + 
+  geom_bar(stat = "identity", aes(color = Var1),fill = "#1f3754"
+
+) +
+  xlab("Not Popular or Popular") +
+  ylab("Number of Posts") +
+  ggtitle("Total Post Types", subtitle = waiver()) 
+```
+
+This is not ideal as we would like the data to be balanced in order to best train our model. However due to the nature of the problem this is unlikely to be easily scraped.
+One notable column in the raw data is the comments column. It signifies how many comments were on the post after a few days. A high number of comments is a good sign that the post has lots of user engagement and is popular.
+
+```{r}
+
+cleaned_dataset %>%
+  group_by(Date)%>%
+  summarize(Comments) %>%
+  ggplot(aes(Date, Comments)) +
+  geom_line() +
+   theme(axis.text.x=element_text(angle = 45, vjust = 0.5)) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom") +
+  labs(title = "Comments Timeline") 
+```
+
+
+We can see that based on this graph the date/time does have some influence on how much engagement a post gets. We can also look at the distribution of post numbers across the subreddits that we scraped.
+
+```{r}
+post_plot<- cleaned_dataset %>% 
+  group_by(Subreddit)%>%
+  summarize(URL=n()) %>% 
+  ggplot(aes(Subreddit, URL)) + 
+  theme(axis.text.x=element_text(angle = 45, vjust = 0.5)) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom") +
+  geom_col()
+  
+
+post_plot
+```
+
+
+The last piece of info that we can look at is the user that submitted the post. Below we create a dataframe of users that created the post we scraped, with the total number of posts that they created during our time of scraping.
+
+```{r}
+
+user_df <- cleaned_dataset %>%
+  group_by(Author) %>%
+  count(URL, name="Num_of_Posts") %>%
+  arrange(desc(Num_of_Posts))
+
+
+```
+
+
+```{r}
+kbl(user_df[1:5,]) %>%
+
+  kable_paper("hover",bootstrap_options = "striped", full_width = F)
+```
+
+# Preparing the data for the model
+
+We prepared the data for our model. Since it is text data we tokenized it and created embeddings for the data.
+
+```{r}
+max_words <- 10000 
+maxlen_title <- 100 
+maxlen_text <- 300 
+
+training_samples <- 16000 
+validation_samples <- 4000
+```
+
+We used the title of the posts and marked the Popular column as our label.
+
+```{r warning=FALSE, message=FALSE}
+tokenizer_title <- text_tokenizer(num_words = max_words) %>%
+  fit_text_tokenizer(cleaned_dataset$Title)
+
+
+tokenizer_text <- text_tokenizer(num_words = max_words) %>%
+  fit_text_tokenizer(cleaned_dataset$Text)
+
+sequences_title <- texts_to_sequences(tokenizer_title, cleaned_dataset$Title)
+word_index = tokenizer_title$word_index
+
+sequences_text <- texts_to_sequences(tokenizer_text, cleaned_dataset$Text)
+word_index_text = tokenizer_text$word_index
+```
+
+```{r}
+cat("Found", length(word_index), "unique tokens in the titles.\n")
+```
+
+
+```{r}
+cat("Found", length(word_index_text), "unique tokens in the text.\n")
+```
+
+
+```{r}
+data_title <- pad_sequences(sequences_title, maxlen = maxlen_title)
+data_text <- pad_sequences(sequences_text, maxlen = maxlen_text)
+```
+
+```{r}
+labels <- as.array(cleaned_dataset$Popular)
+cat("Shape of data tensor for title (Num Docs, Num Words in a Doc):", dim(data_title), "\n")
+```
+
+
+```{r}
+cat("Shape of data tensor for text (Num Docs, Num Words in a Doc):", dim(data_text), "\n")
+
+```
+
+```{r}
+cat('Shape of label tensor (Num Docs):', dim(labels), "\n")
+```
+
+Now that the data is prepped we can create our training and validation sets from the data.
+
+```{r}
+set.seed(123)
+indices <- sample(1:nrow(data_title))
+training_indices <- indices[1:training_samples]
+validation_indices <- indices[(training_samples + 1):
+                                (training_samples + validation_samples)]
+```
+
+
+```{r}
+x_train_title <- data_title[training_indices,]
+y_train <- labels[training_indices]
+x_val_title <- data_title[validation_indices,]
+y_val <- labels[validation_indices]
+
+x_train_text <- data_text[training_indices,]
+x_val_text <- data_text[validation_indices,]
+x_train_timestamp <- cleaned_dataset$Timestamp[training_indices]
+x_val_timestamp <- cleaned_dataset$Timestamp[validation_indices]
+```
+
+Like many other communities online reddit has developed slang that is somewhat unique to it. This is especially true when it comes to specific subreddits, which might use acronyms or words that have special meaning in those specific community. For these reasons it would be ideal to be able to create our own word embeddings, but we do not have the compute power or the time it would take to complete this. So we will be using pre-trained embeddings from glove to create our embeddings matrix. We will be using the 50 dimension embedding vectors from glove.
+
+```{r}
+glove_dir = "C:/Users/prath/Downloads/glove.6B (1)"
+lines <- readLines(file.path(glove_dir, "glove.6B.50d.txt"))
+embeddings_index <- new.env(hash = TRUE, parent = emptyenv())
+for (i in 1:49000) {
+  line <- lines[[i]]
+  values <- strsplit(line, " ")[[1]]
+  word <- values[[1]]
+  embeddings_index[[word]] <- as.double(values[-1])
+}
+cat("Found", length(embeddings_index), "word vectors.\n")
+
+
+```
+
+
+```{r}
+embedding_dim <- 50
+embedding_matrix <- array(0, dim = c(max_words, embedding_dim))
+for (word in names(word_index)) { # for every word
+  index <- word_index[[word]] # get its index
+  if (index < max_words) { # only consider the top 10k words
+    # get the word's embedding vector from GloVe
+    embedding_vector <- embeddings_index[[word]]
+    if (!is.null(embedding_vector)) { # if GloVe has the embedding vector
+      # index 1 isn't supposed to stand for any word or token
+      # --it's a placeholder. So we skip 1 here:
+      embedding_matrix[index+1,] <- embedding_vector
+    }
+  }
+}
+```
+
+
+# Model Procedure
+
+```{r}
+model <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen_title,
+                  output_dim = embedding_dim) %>%
+  layer_flatten() %>%
+  layer_dense(units = 32, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+summary(model)
+```
+
+
+```{r}
+get_layer(model, index = 1) %>% # manually configure the embedding layer
+  set_weights(list(embedding_matrix)) %>% # set the weights based on GloVe
+  freeze_weights() # do not update the weights in this layer anymore
+model %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+
+history <- model %>% fit(
+  x_train_title, y_train,
+  epochs = 20,
+  batch_size = 32,
+  validation_data = list(x_val_title, y_val)
+)
+```
+
+```{r}
+plot(history)
+```
+
+# Model1 - Simple RNN
+
+A recurrent neural network (RNN) is a class of artificial neural networks where connections between nodes can create a cycle, allowing output from some nodes to affect subsequent input to the same nodes. This allows it to exhibit temporal dynamic behavior. Derived from feedforward neural networks, RNNs can use their internal state (memory) to process variable length sequences of inputs. This makes them applicable to tasks such as unsegmented, connected handwriting recognition or speech recognition . Recurrent neural networks are theoretically Turing complete and can run arbitrary programs to process arbitrary sequences of inputs.
+
+```{r warning =FALSE, message=FALSE}
+modelSimpleRNN <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen_title,
+                  output_dim = embedding_dim) %>%
+  layer_simple_rnn(units = 32) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+modelSimpleRNN  %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+historySimpleRNN <- modelSimpleRNN  %>% fit(
+  x_train_title, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_split = 0.2
+)
+```
+
+# Model Result - Simple RNN
+
+The Simple RNN model is able to achieve almost 96% accuracy on the training data and 86% on the validation data with a loss of 39%.
+
+```{r}
+plot(historySimpleRNN)
+```
+
+# Model2 - RNN with LSTM
+
+Long short-term memory (LSTM) networks are an extension of RNN that extend the memory. LSTM are used as the building blocks for the layers of a RNN. LSTMs assign data “weights” which helps RNNs to either let new information in, forget information or give it importance enough to impact the output.
+
+```{r warning =FALSE, message=FALSE}
+modelLSTM <- keras_model_sequential() %>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen_title,
+                  output_dim = embedding_dim) %>%
+  layer_lstm(units = 32) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+modelLSTM %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+historyLSTM <- modelLSTM %>% fit(
+  x_train_title, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_split = 0.2
+)
+```
+
+# Model Result - RNN with LSTM
+
+The RNN with LSTM model is able to achieve almost 99% accuracy on the training data and 86% on the validation data with a loss of 66%.
+
+```{r}
+plot(historyLSTM)
+```
+
+
+# Model 3: RNN - Bidirectional LSTM
+
+A Bidirectional LSTM, or biLSTM, is a sequence processing model that consists of two LSTMs: one taking the input in a forward direction, and the other in a backwards direction. BiLSTMs effectively increase the amount of information available to the network, improving the context available to the algorithm (e.g. knowing what words immediately follow and precede a word in a sentence).
+
+```{r warning =FALSE, message=FALSE}
+modelBidirectionalLSTM <- keras_model_sequential()%>%
+  layer_embedding(input_dim = max_words,
+                  input_length = maxlen_title,
+                  output_dim = embedding_dim)%>%
+  bidirectional(
+    layer_lstm(units = 32)
+  ) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+
+modelBidirectionalLSTM %>% compile(
+  optimizer = "adam",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+
+historyBidirectionalLSTM <- modelBidirectionalLSTM %>% fit(
+  x_train_title, y_train,
+  epochs = 10,
+  batch_size = 32,
+  validation_split = 0.2
+)
+```
+
+# Model Result - RNN with Bidirectional LSTM
+
+The RNN with Bidirectional LSTM model is able to achieve almost 99% accuracy on the training data and 87% on the validation data with a loss of 72%.
+
+```{r}
+plot(historyBidirectionalLSTM)
+```
+
+We tried a few model configurations and found that they all had roughly the same accuracy, with varying loss factors.Almost all of the models hovered around a certain accuracy. 
+
+Based on these various factors we feel like we have achieved quite a good model. Through this model we can see that RNN, especially with bidirectional lstm layers, can be quite useful in tackling NLP problems.
